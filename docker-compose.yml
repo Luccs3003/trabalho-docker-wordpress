@@ -1,0 +1,101 @@
+services:
+  db:
+    image: mysql:5.7
+    container_name: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: r00t
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: usr-wordpress
+      MYSQL_PASSWORD: pwd-wordpress
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pr00t"]
+      interval: 5s
+      retries: 30
+
+  wordpress1:
+    image: wordpress:5.4.2-php7.2-apache
+    container_name: wordpress1
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: usr-wordpress
+      WORDPRESS_DB_PASSWORD: pwd-wordpress
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - ./wordpress:/var/www/html
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    # espera o wp1 criar os arquivos antes de subir os outros
+    healthcheck:
+      test: ["CMD", "test", "-f", "/var/www/html/wp-config.php"]
+      interval: 5s
+      retries: 30
+
+  wordpress2:
+    image: wordpress:5.4.2-php7.2-apache
+    container_name: wordpress2
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: usr-wordpress
+      WORDPRESS_DB_PASSWORD: pwd-wordpress
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - ./wordpress:/var/www/html
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      wordpress1:
+        condition: service_healthy
+
+  wordpress3:
+    image: wordpress:5.4.2-php7.2-apache
+    container_name: wordpress3
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: usr-wordpress
+      WORDPRESS_DB_PASSWORD: pwd-wordpress
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - ./wordpress:/var/www/html
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      wordpress1:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.19.0
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./wordpress:/usr/share/nginx/html
+    networks:
+      - frontend
+    depends_on:
+      - wordpress1
+      - wordpress2
+      - wordpress3
+
+networks:
+  frontend:
+  backend:
+    internal: true
+
+volumes:
+  db_data:
