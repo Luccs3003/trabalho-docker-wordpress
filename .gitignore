@@ -1,1 +1,3 @@
 wordpress/
+.dados/
+__pycache__/
