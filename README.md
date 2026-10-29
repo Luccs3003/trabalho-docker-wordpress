@@ -65,7 +65,7 @@ O Locust utiliza `locustio/locust:2.32.6`.
 - **[Relatório completo](resultados/relatorio.html)** — abra no navegador; contém a tabela, os seis gráficos e a análise.
 - **[Dados consolidados](resultados/resumo.csv)** — valores utilizados nos gráficos.
 
-Os gráficos comparam tempo médio do HTML por número de usuários e requisições por
+Os gráficos comparam o p95 do HTML por número de usuários e requisições por
 segundo por número de instâncias. O p95 e a porcentagem de falhas estão na tabela.
 RPS inclui HTML e imagem quando houver, portanto não equivale a visitas por segundo.
 Alertas de CPU do gerador e de atraso da coleta também são registrados.
@@ -108,6 +108,12 @@ Para apenas atualizar o relatório a partir de uma coleta existente:
 
 ```bash
 bash executar.sh --relatorio
+```
+
+Para regenerar somente os gráficos a partir do CSV, sem Docker ou dados brutos:
+
+```bash
+python testes/relatorio.py --csv resultados/resumo.csv resultados
 ```
 
 Para experimentar uma carga isolada sem substituir os resultados da entrega:

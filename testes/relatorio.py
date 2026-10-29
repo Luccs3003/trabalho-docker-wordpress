@@ -3,6 +3,7 @@ import csv
 import html
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -40,11 +41,11 @@ def ler_resultados(pasta):
 
 
 def grafico(cenario, dados, metrica):
-    tempo = metrica == 'media_ms'
-    xs, series = (USUARIOS, [1, 2, 3]) if tempo else ([1, 2, 3], USUARIOS)
-    titulo = CENARIOS[cenario] + (' — tempo de resposta' if tempo else ' — vazão')
-    eixo_x = 'Usuários simultâneos' if tempo else 'Instâncias WordPress'
-    eixo_y = 'Tempo médio do HTML (ms)' if tempo else 'Requisições HTTP/s'
+    percentil = metrica == 'p95_ms'
+    xs, series = (USUARIOS, [1, 2, 3]) if percentil else ([1, 2, 3], USUARIOS)
+    titulo = CENARIOS[cenario] + (' — p95 do tempo de resposta' if percentil else ' — vazão')
+    eixo_x = 'Usuários simultâneos' if percentil else 'Instâncias WordPress'
+    eixo_y = 'p95 do HTML (ms)' if percentil else 'Requisições HTTP/s'
     valores = [r[metrica] for r in dados.values() if r['cenario'] == cenario]
     alvo = max(1, max(valores, default=1) / 5)
     ordem = 10 ** math.floor(math.log10(alvo))
@@ -56,7 +57,7 @@ def grafico(cenario, dados, metrica):
               f'<text x="380" y="24" text-anchor="middle" font-size="17">{html.escape(titulo)}</text>']
     for i, serie in enumerate(series):
         x = 110 + i * 205
-        rotulo = f'{serie} ' + ('instância(s)' if tempo else 'usuários')
+        rotulo = f'{serie} ' + ('instância(s)' if percentil else 'usuários')
         partes += [f'<rect x="{x}" y="40" width="14" height="14" fill="{CORES[i]}"/>',
                    f'<text x="{x + 21}" y="52">{rotulo}</text>']
     for i in range(6):
@@ -67,7 +68,7 @@ def grafico(cenario, dados, metrica):
         centro = 195 + i * 210
         partes.append(f'<text x="{centro}" y="325" text-anchor="middle">{x}</text>')
         for j, serie in enumerate(series):
-            chave = (cenario, serie, x) if tempo else (cenario, x, serie)
+            chave = (cenario, serie, x) if percentil else (cenario, x, serie)
             if chave not in dados:
                 continue
             valor = dados[chave][metrica]
@@ -79,6 +80,23 @@ def grafico(cenario, dados, metrica):
                f'<text transform="translate(20,190) rotate(-90)" text-anchor="middle">{eixo_y}</text>',
                '</g></svg>']
     return ''.join(partes)
+
+
+def gerar_analise(dados):
+    observacoes = []
+    for cenario, titulo in CENARIOS.items():
+        menor, maior = min(USUARIOS), max(USUARIOS)
+        a, b = dados.get((cenario, 3, menor)), dados.get((cenario, 3, maior))
+        if a and b and menor != maior:
+            texto = (f'{titulo}: com três instâncias, ao passar de {menor} para {maior} usuários '
+                     f'o p95 do HTML passou de {a["p95_ms"]:.0f} para {b["p95_ms"]:.0f} ms. ')
+            uma, tres = dados.get((cenario, 1, maior)), dados.get((cenario, 3, maior))
+            if uma and tres:
+                texto += (f'Com {maior} usuários, a vazão foi de {uma["rps"]:.2f} req/s com uma instância '
+                          f'e {tres["rps"]:.2f} req/s com três, mostrando que adicionar instâncias '
+                          'não produziu crescimento proporcional neste ambiente.')
+            observacoes.append(texto)
+    return ''.join(f'<li>{o}</li>' for o in observacoes) or '<li>Faltam combinações para comparar as cargas e arquiteturas.</li>'
 
 
 def gerar(pasta, destino):
@@ -130,7 +148,7 @@ def gerar(pasta, destino):
                         f'<td>{r["rps"]:.2f}</td><td>{r["falhas_percentual"]:.2f}%</td><td>{alerta}</td></tr>')
                 else:
                     tabela.append('<tr>' + inicio + '<td colspan="5">Não coletado</td></tr>')
-        for metrica, sufixo in [('media_ms', 'tempo'), ('rps', 'vazao')]:
+        for metrica, sufixo in [('p95_ms', 'tempo'), ('rps', 'vazao')]:
             svg = grafico(cenario, dados, metrica)
             (destino / f'{cenario}-{sufixo}.svg').write_text(svg, encoding='utf-8')
             figuras.append(svg)
@@ -163,21 +181,7 @@ def gerar(pasta, destino):
             'lentos e alertas de CPU do gerador. Por isso, a matriz principal foi refeita com '
             '50, 200 e 500 usuários. As cargas maiores não estão misturadas nos gráficos desta matriz.</p>'
             '<ul>' + ''.join(f'<li>{h}</li>' for h in historico) + '</ul>')
-    observacoes = []
-    for cenario, titulo in CENARIOS.items():
-        menor, maior = min(USUARIOS), max(USUARIOS)
-        a, b = dados.get((cenario, 3, menor)), dados.get((cenario, 3, maior))
-        if a and b and menor != maior:
-            texto = (f'{titulo}: com três instâncias, ao passar de {menor} para {maior} usuários '
-                f'o tempo médio passou de {a["media_ms"]:.0f} para {b["media_ms"]:.0f} ms. '
-                f'A combinação de {maior} usuários registrou {b["falhas_percentual"]:.2f}% de falhas. ')
-            uma, tres = dados.get((cenario, 1, 500)), dados.get((cenario, 3, 500))
-            if uma and tres:
-                texto += (f'Com 500 usuários, a vazão foi de {uma["rps"]:.2f} req/s com uma instância '
-                          f'e {tres["rps"]:.2f} req/s com três, mostrando que adicionar instâncias '
-                          'não produziu crescimento proporcional neste ambiente.')
-            observacoes.append(texto)
-    analise = ''.join(f'<li>{o}</li>' for o in observacoes) or '<li>Faltam combinações para comparar as cargas e arquiteturas.</li>'
+    analise = gerar_analise(dados)
     pagina = f'''<!doctype html><html lang="pt-BR"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Trabalho 3 — Resultados</title>
@@ -211,7 +215,7 @@ o intervalo equivalente do CSV (quantidade/RPS). Dados ausentes não são zeros.
 {avaliacao}
 <div class="tabela"><table><tr><th>Cenário</th><th>Instâncias</th><th>Usuários</th><th>Média (ms)</th>
 <th>p95 (ms)</th><th>RPS</th><th>Falhas</th><th>Alertas</th></tr>{''.join(tabela)}</table></div>
-<h2>Gráficos</h2><p>Tempo por número de usuários e vazão por número de instâncias, para cada conteúdo.</p>
+<h2>Gráficos</h2><p>p95 do HTML por número de usuários e vazão por número de instâncias, para cada conteúdo.</p>
 <div class="graficos">{''.join(figuras)}</div>
 <h2>Análise</h2><ul>{analise}</ul>
 <p>Latência maior sem crescimento proporcional de vazão é compatível com saturação.
@@ -230,5 +234,42 @@ Este HTML contém os seis gráficos e pode ser aberto offline.</p></html>'''
     print(f'{len(dados)}/{esperado} combinações; relatório e gráficos em {destino}')
 
 
+def gerar_graficos_csv(arquivo, destino):
+    """Regenera os gráficos e os substitui no HTML usando somente o resumo CSV."""
+    global USUARIOS
+    with arquivo.open(encoding='utf-8-sig', newline='') as entrada:
+        linhas = []
+        for linha in csv.DictReader(entrada):
+            linhas.append(dict(cenario=linha['cenario'], instancias=int(linha['instancias']),
+                usuarios=int(linha['usuarios']), p95_ms=float(linha['p95_ms']),
+                rps=float(linha['rps'])))
+    USUARIOS = sorted({r['usuarios'] for r in linhas})
+    dados = {(r['cenario'], r['instancias'], r['usuarios']): r for r in linhas}
+    graficos = []
+    for cenario in CENARIOS:
+        for metrica, sufixo in [('p95_ms', 'tempo'), ('rps', 'vazao')]:
+            svg = grafico(cenario, dados, metrica)
+            (destino / f'{cenario}-{sufixo}.svg').write_text(svg, encoding='utf-8')
+            graficos.append(svg)
+    relatorio = destino / 'relatorio.html'
+    pagina = relatorio.read_text(encoding='utf-8')
+    pagina, quantidade = re.subn(r'<svg\b.*?</svg>', lambda _: graficos.pop(0), pagina,
+                                 count=6, flags=re.DOTALL)
+    if quantidade != 6:
+        raise SystemExit(f'Esperados 6 gráficos no relatório, encontrados {quantidade}.')
+    pagina = pagina.replace('Tempo por número de usuários e vazão por número de instâncias',
+                            'p95 do HTML por número de usuários e vazão por número de instâncias')
+    pagina, quantidade_analise = re.subn(r'(<h2>Análise</h2><ul>).*?(</ul>)',
+        lambda m: m.group(1) + gerar_analise(dados) + m.group(2), pagina,
+        count=1, flags=re.DOTALL)
+    if quantidade_analise != 1:
+        raise SystemExit('Seção de análise não encontrada no relatório.')
+    relatorio.write_text(pagina, encoding='utf-8')
+    print(f'6 gráficos regenerados a partir de {arquivo}')
+
+
 if __name__ == '__main__':
-    gerar(Path(sys.argv[1]), Path(sys.argv[2]))
+    if len(sys.argv) == 4 and sys.argv[1] == '--csv':
+        gerar_graficos_csv(Path(sys.argv[2]), Path(sys.argv[3]))
+    else:
+        gerar(Path(sys.argv[1]), Path(sys.argv[2]))
